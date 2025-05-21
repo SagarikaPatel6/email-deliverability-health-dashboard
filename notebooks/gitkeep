@@ -51,3 +51,83 @@ sns.barplot(x=importances, y=feature_names)
 plt.title('Feature Importance')
 plt.show()
 
+#XgBoost needs to be used
+
+from xgboost import XGBClassifier
+from sklearn.metrics import roc_auc_score
+
+xgb = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
+xgb.fit(X_train, y_train)
+y_pred_xgb = xgb.predict(X_test)
+
+print(classification_report(y_test, y_pred_xgb))
+print("ROC AUC Score:", roc_auc_score(y_test, y_pred_xgb))
+
+from sklearn.utils import class_weight
+
+X = df[features]
+y = df['bounce_likelihood']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+
+# Option A: Adjust class weights
+xgb = XGBClassifier(scale_pos_weight=(len(y_train[y_train==0]) / len(y_train[y_train==1])),
+                    use_label_encoder=False, eval_metric='logloss')
+
+X_test['actual'] = y_test
+X_test['predicted'] = y_pred_xgb
+false_negatives = X_test[(X_test['actual'] == 1) & (X_test['predicted'] == 0)]
+false_negatives.head()
+
+# Handle class imbalance
+pos_weight = len(y_train[y_train == 0]) / len(y_train[y_train == 1])
+
+xgb = XGBClassifier(use_label_encoder=False, eval_metric='logloss', scale_pos_weight=pos_weight)
+xgb.fit(X_train, y_train)
+y_pred_xgb = xgb.predict(X_test[features])  # Use only model features
+
+print(classification_report(y_test, y_pred_xgb))
+print("ROC AUC Score:", roc_auc_score(y_test, y_pred_xgb))
+
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+cm = confusion_matrix(y_test, y_pred_xgb)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[0, 1])
+disp.plot(cmap="Blues")
+plt.title("Confusion Matrix - XGBoost")
+plt.show()
+
+from sklearn.metrics import roc_curve, auc
+
+# Only use original features that the model was trained on
+X_test_clean = X_test[features]
+
+# Get probability scores for class 1 (bounce)
+y_scores = xgb.predict_proba(X_test_clean)[:, 1]
+
+# Compute ROC curve and AUC
+fpr, tpr, thresholds = roc_curve(y_test, y_scores)
+roc_auc = auc(fpr, tpr)
+
+# Plot
+plt.figure(figsize=(8, 6))
+plt.plot(fpr, tpr, label='XGBoost (AUC = %0.2f)' % roc_auc)
+plt.plot([0, 1], [0, 1], 'k--', label='Random Baseline')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve')
+plt.legend(loc='lower right')
+plt.grid(True)
+plt.show()
+
+# Create export DataFrame with predictions, keeping model input clean
+export_df = X_test_clean.copy()
+export_df['actual'] = y_test.values
+export_df['predicted'] = xgb.predict(X_test_clean[features])
+export_df['probability'] = y_scores
+
+# Export to CSV
+export_df.to_csv("xgboost_scored_emails.csv", index=False)
+
+from google.colab import files
+files.download("xgboost_scored_emails.csv")
